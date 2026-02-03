@@ -1,0 +1,307 @@
+<!-- Giallo Scores Widget - Versión Pro Elite por Lorenzo Giamborino -->
+<div id="giallo-widget-root" style="background-color: #050505; color: #ffffff; border-radius: 24px; overflow: hidden; max-width: 480px; margin: 20px auto; font-family: 'Archivo', sans-serif; border: 1px solid #1a1a1a; box-shadow: 0 20px 40px rgba(0,0,0,0.4); position: relative;">
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Archivo:wght@400;700;900&display=swap');
+        
+        #giallo-widget-root .match-card {
+            background: #111111; border: 1px solid #222222; border-radius: 18px; padding: 16px; margin-bottom: 12px; cursor: pointer; transition: 0.2s;
+        }
+        #giallo-widget-root .match-card:hover { border-color: #3b82f6; }
+
+        #giallo-widget-root .status-label {
+            font-size: 8px; font-weight: 900; padding: 3px 8px; border-radius: 6px; text-transform: uppercase;
+        }
+        #giallo-widget-root .status-live { background: #ef4444; color: white; animation: giallo-pulse 1.5s infinite; }
+        #giallo-widget-root .status-final { background: #333; color: #888; }
+        #giallo-widget-root .status-next { background: #1a1a1a; color: #3b82f6; border: 1px solid #3b82f633; }
+
+        @keyframes giallo-pulse { 0% { opacity: 1; } 50% { opacity: 0.6; } 100% { opacity: 1; } }
+
+        #giallo-widget-root .btn-nav {
+            background: #111; color: #555; padding: 10px; border-radius: 12px; font-size: 10px; font-weight: 900; flex: 1; border: 1px solid #222; cursor: pointer;
+        }
+        #giallo-widget-root .btn-nav.active { background: #3b82f6; color: white; border-color: #3b82f6; }
+
+        #giallo-widget-root .modal-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.98); backdrop-filter: blur(15px); z-index: 100; display: none; overflow-y: auto; padding: 20px;
+        }
+        #giallo-widget-root .scroll-area::-webkit-scrollbar { display: none; }
+        
+        #giallo-widget-root .stat-row { margin-bottom: 12px; }
+        #giallo-widget-root .stat-bar-bg { background: #222; height: 4px; border-radius: 2px; display: flex; overflow: hidden; margin-top: 4px; }
+        #giallo-widget-root .stat-fill-l { background: #3b82f6; height: 100%; transition: 0.5s; }
+        #giallo-widget-root .stat-fill-r { background: #555; height: 100%; transition: 0.5s; }
+
+        #giallo-widget-root .event-item { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 10px; }
+        #giallo-widget-root .event-time { font-weight: 900; color: #3b82f6; min-width: 25px; }
+    </style>
+
+    <!-- Header -->
+    <div style="padding: 24px; border-bottom: 1px solid #1a1a1a; background: #0a0a0a;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+            <div>
+                <h2 style="margin: 0; font-size: 18px; font-weight: 900; font-style: italic; text-transform: uppercase;">GIALLO <span style="color: #3b82f6;">SCORES</span></h2>
+                <p id="tn-clock" style="margin: 2px 0 0 0; font-size: 8px; color: #444; font-weight: 700;"></p>
+            </div>
+            <button onclick="toggleSearchUI()" style="background: #222; border: none; color: white; padding: 8px 12px; border-radius: 10px; font-size: 9px; font-weight: 900; cursor: pointer;">BUSCAR EQUIPO</button>
+        </div>
+        <div id="fav-container" style="display: flex; gap: 12px; overflow-x: auto;" class="scroll-area"></div>
+    </div>
+
+    <!-- Buscador -->
+    <div id="search-box" style="display: none; padding: 15px 24px; background: #080808; border-bottom: 1px solid #1a1a1a;">
+        <input type="text" id="team-search-input" style="width:100%; background:#111; border:1px solid #222; border-radius:12px; padding:12px; color:white; outline:none;" placeholder="Escribe el nombre de un club...">
+        <div id="search-results" style="max-height: 200px; overflow-y: auto;" class="scroll-area"></div>
+    </div>
+
+    <!-- Navegación -->
+    <div style="display: flex; gap: 8px; padding: 15px 24px;">
+        <button onclick="updateGiallo(-1)" id="btn-prev" class="btn-nav">AYER</button>
+        <button onclick="updateGiallo(0)" id="btn-today" class="btn-nav active">HOY</button>
+        <button onclick="updateGiallo(1)" id="btn-next" class="btn-nav">MAÑANA</button>
+    </div>
+
+    <!-- Feed Principal -->
+    <div id="giallo-feed" class="scroll-area" style="padding: 0 24px 24px 24px; min-height: 400px; max-height: 550px; overflow-y: auto;"></div>
+
+    <!-- Modal Detalles -->
+    <div id="giallo-modal" class="modal-overlay scroll-area">
+        <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+            <button onclick="closeModal()" style="background:#222; border:none; color:white; padding:8px 15px; border-radius:10px; font-size:10px; font-weight:900;">VOLVER</button>
+        </div>
+        <div id="modal-body"></div>
+    </div>
+</div>
+
+<script>
+    (function() {
+        const KEY = "3af7c318c595188d2f4fbd7b9071c1c4";
+        const URL = "https://v3.football.api-sports.io";
+        let userFavs = JSON.parse(localStorage.getItem('giallo_user_favs')) || [];
+
+        const LEAGUE_PRIORITY = {
+            2: 100, 13: 98, 11: 95, 128: 90, 130: 85, 140: 80, 39: 80
+        };
+
+        async function callApi(path) {
+            try {
+                const r = await fetch(`${URL}/${path}`, {
+                    headers: { "x-rapidapi-key": KEY, "x-rapidapi-host": "v3.football.api-sports.io" }
+                });
+                return await r.json();
+            } catch (e) { return null; }
+        }
+
+        window.toggleSearchUI = () => {
+            const box = document.getElementById('search-box');
+            box.style.display = box.style.display === 'none' ? 'block' : 'none';
+        };
+
+        window.closeModal = () => { document.getElementById('giallo-modal').style.display = 'none'; };
+
+        window.showMatch = async (id) => {
+            const body = document.getElementById('modal-body');
+            document.getElementById('giallo-modal').style.display = 'block';
+            body.innerHTML = '<p style="text-align:center; padding:50px; font-size:10px; font-weight:900; color:#3b82f6;">CARGANDO...</p>';
+
+            const data = await callApi(`fixtures?id=${id}&timezone=America/Argentina/Buenos_Aires`);
+            const m = data.response[0];
+
+            // Ordenar eventos de viejo a nuevo
+            const events = m.events || [];
+            const homeEvents = events.filter(e => e.team.id === m.teams.home.id);
+            const awayEvents = events.filter(e => e.team.id === m.teams.away.id);
+
+            // Obtener estadísticas
+            const stats = m.statistics || [];
+            const getStat = (label) => {
+                if(!stats.length) return {h:0, a:0, ph:0, pa:0};
+                const h = stats[0].statistics.find(s => s.type === label)?.value || 0;
+                const a = stats[1].statistics.find(s => s.type === label)?.value || 0;
+                const total = (parseFloat(h) || 0) + (parseFloat(a) || 0);
+                return {
+                    h, a, 
+                    ph: total ? (parseFloat(h)/total)*100 : 50, 
+                    pa: total ? (parseFloat(a)/total)*100 : 50
+                };
+            };
+
+            const pos = getStat("Ball Possession");
+            const shots = getStat("Total Shots");
+
+            body.innerHTML = `
+                <!-- Marcador Estilo BeSoccer -->
+                <div style="display:flex; justify-content:space-around; align-items:center; margin-bottom:20px; background:#111; padding:20px; border-radius:24px;">
+                    <div style="text-align:center; width:30%;">
+                        <img src="${m.teams.home.logo}" style="width:45px;">
+                        <p style="font-size:10px; font-weight:900; margin-top:8px;">${m.teams.home.name}</p>
+                    </div>
+                    <div style="text-align:center;">
+                        <p style="font-size:32px; font-weight:900; font-style:italic;">${m.goals.home ?? 0} : ${m.goals.away ?? 0}</p>
+                        <p style="font-size:8px; color:#ef4444; font-weight:900;">${m.fixture.status.long.toUpperCase()}</p>
+                    </div>
+                    <div style="text-align:center; width:30%;">
+                        <img src="${m.teams.away.logo}" style="width:45px;">
+                        <p style="font-size:10px; font-weight:900; margin-top:8px;">${m.teams.away.name}</p>
+                    </div>
+                </div>
+
+                <!-- Info Estadio y Árbitro -->
+                <div style="background:#111; border-radius:20px; padding:15px; margin-bottom:20px; border:1px solid #222;">
+                    <div style="display:flex; gap:12px; align-items:center;">
+                        <img src="${m.fixture.venue.id ? 'https://media.api-sports.io/football/venues/'+m.fixture.venue.id+'.png' : 'https://via.placeholder.com/80x60?text=Estadio'}" 
+                             style="width:70px; height:50px; border-radius:8px; object-fit:cover; background:#222;">
+                        <div>
+                            <p style="font-size:11px; font-weight:900;">${m.fixture.venue.name || 'Estadio no informado'}</p>
+                            <p style="font-size:9px; color:#555; font-weight:700;">📍 ${m.fixture.venue.city || '---'} | 👤 Ref: ${m.fixture.referee || 'A confirmar'}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Estadísticas Comparativas -->
+                <div style="background:#0a0a0a; padding:20px; border-radius:20px; margin-bottom:20px; border:1px solid #1a1a1a;">
+                    <p style="font-size:9px; font-weight:900; color:#3b82f6; margin-bottom:15px; text-align:center;">ESTADÍSTICAS DEL PARTIDO</p>
+                    
+                    <div class="stat-row">
+                        <div style="display:flex; justify-content:space-between; font-size:10px; font-weight:900;">
+                            <span>${pos.h || '0%'}</span><span>POSESIÓN</span><span>${pos.a || '0%'}</span>
+                        </div>
+                        <div class="stat-bar-bg">
+                            <div class="stat-fill-l" style="width:${pos.ph}%"></div>
+                            <div class="stat-fill-r" style="width:${pos.pa}%"></div>
+                        </div>
+                    </div>
+
+                    <div class="stat-row">
+                        <div style="display:flex; justify-content:space-between; font-size:10px; font-weight:900;">
+                            <span>${shots.h}</span><span>REMATES TOTALES</span><span>${shots.a}</span>
+                        </div>
+                        <div class="stat-bar-bg">
+                            <div class="stat-fill-l" style="width:${shots.ph}%"></div>
+                            <div class="stat-fill-r" style="width:${shots.pa}%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Eventos por Equipo (Cronológico) -->
+                <p style="font-size:9px; font-weight:900; color:#555; margin-bottom:10px; text-align:center;">CRONOLOGÍA DE EVENTOS</p>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                    <div style="border-right: 1px solid #222; padding-right:10px;">
+                        ${homeEvents.map(e => `
+                            <div class="event-item" style="justify-content: flex-end; text-align:right;">
+                                <span>${e.player.name} <br> <small style="color:#555">${e.detail}</small></span>
+                                <span class="event-time">${e.time.elapsed}'</span>
+                            </div>
+                        `).join('') || '<p style="font-size:8px; color:#333; text-align:right;">---</p>'}
+                    </div>
+                    <div style="padding-left:10px;">
+                        ${awayEvents.map(e => `
+                            <div class="event-item">
+                                <span class="event-time">${e.time.elapsed}'</span>
+                                <span>${e.player.name} <br> <small style="color:#555">${e.detail}</small></span>
+                            </div>
+                        `).join('') || '<p style="font-size:8px; color:#333;">---</p>'}
+                    </div>
+                </div>
+            `;
+        };
+
+        window.updateGiallo = async (offset) => {
+            const feed = document.getElementById('giallo-feed');
+            document.querySelectorAll('.btn-nav').forEach(b => b.classList.remove('active'));
+            if(offset === -1) document.getElementById('btn-prev').classList.add('active');
+            if(offset === 0) document.getElementById('btn-today').classList.add('active');
+            if(offset === 1) document.getElementById('btn-next').classList.add('active');
+
+            feed.innerHTML = '<p style="text-align:center; padding:100px; font-size:10px; font-weight:900; color:#3b82f6;">ACTUALIZANDO...</p>';
+
+            const argDate = new Date(new Date().toLocaleString("en-US", {timeZone: "America/Argentina/Buenos_Aires"}));
+            argDate.setDate(argDate.getDate() + offset);
+            const dateStr = argDate.toISOString().split('T')[0];
+
+            const data = await callApi(`fixtures?date=${dateStr}&timezone=America/Argentina/Buenos_Aires`);
+
+            if(!data?.response?.length) {
+                feed.innerHTML = '<p style="text-align:center; padding:100px; color:#333; font-size:10px; font-weight:900;">SIN PARTIDOS</p>';
+                return;
+            }
+
+            const matches = data.response.sort((a, b) => {
+                const aLive = ["1H", "2H", "HT"].includes(a.fixture.status.short) ? 1 : 0;
+                const bLive = ["1H", "2H", "HT"].includes(b.fixture.status.short) ? 1 : 0;
+                if (aLive !== bLive) return bLive - aLive;
+                const aFav = userFavs.some(f => f.id === a.teams.home.id || f.id === a.teams.away.id) ? 1 : 0;
+                const bFav = userFavs.some(f => f.id === b.teams.home.id || f.id === b.teams.away.id) ? 1 : 0;
+                if (aFav !== bFav) return bFav - aFav;
+                return (LEAGUE_PRIORITY[b.league.id] || 0) - (LEAGUE_PRIORITY[a.league.id] || 0);
+            });
+
+            feed.innerHTML = '';
+            matches.forEach(m => {
+                const status = m.fixture.status.short;
+                const isLive = ["1H", "2H", "HT"].includes(status);
+                const isFT = ["FT", "AET", "PEN"].includes(status);
+                const isNS = status === "NS";
+
+                let labelClass = "status-next";
+                let labelText = status;
+                if(isLive) { labelClass = "status-live"; labelText = `VIVO ${m.fixture.status.elapsed}'`; }
+                if(isFT) { labelClass = "status-final"; labelText = "FINAL"; }
+                if(isNS) { labelText = "PRÓXIMO"; }
+
+                let centerDisplay = `<div style="font-size:22px; font-weight:900; letter-spacing:-1px;">${m.goals.home ?? 0} : ${m.goals.away ?? 0}</div>`;
+
+                if (isNS) {
+                    const time = new Date(m.fixture.date).toLocaleTimeString("es-AR", { hour: '2-digit', minute: '2-digit', timeZone: "America/Argentina/Buenos_Aires" });
+                    centerDisplay = `<div style="font-size:14px; font-weight:900; color:#3b82f6; background:rgba(59,130,246,0.1); padding:4px 10px; border-radius:8px;">${time}</div>`;
+                }
+
+                const card = document.createElement('div');
+                card.className = 'match-card';
+                card.onclick = () => showMatch(m.fixture.id);
+                card.innerHTML = `
+                    <div style="display:flex; justify-content:space-between; margin-bottom:12px; align-items:center;">
+                        <span style="font-size:8px; color:#555; font-weight:900;">${m.league.name.toUpperCase()}</span>
+                        <span class="status-label ${labelClass}">${labelText}</span>
+                    </div>
+                    <div style="display:flex; align-items:center; justify-content:space-between;">
+                        <div style="width:35%; text-align:center;">
+                            <img src="${m.teams.home.logo}" style="width:28px; height:28px; object-fit:contain; margin-bottom:5px;">
+                            <span style="font-size:9px; font-weight:900; display:block;">${m.teams.home.name}</span>
+                        </div>
+                        <div style="width:30%; text-align:center;">${centerDisplay}</div>
+                        <div style="width:35%; text-align:center;">
+                            <img src="${m.teams.away.logo}" style="width:28px; height:28px; object-fit:contain; margin-bottom:5px;">
+                            <span style="font-size:9px; font-weight:900; display:block;">${m.teams.away.name}</span>
+                        </div>
+                    </div>
+                `;
+                feed.appendChild(card);
+            });
+        };
+
+        function renderFavBar() {
+            const container = document.getElementById('fav-container');
+            container.innerHTML = '';
+            userFavs.forEach(team => {
+                const img = document.createElement('img');
+                img.src = team.logo;
+                img.style = "width:40px; height:40px; border-radius:50%; border:2px solid #3b82f6; padding:4px; cursor:pointer; background:#111; flex-shrink:0;";
+                img.onclick = () => { /* showTeam logic could go here */ };
+                container.appendChild(img);
+            });
+        }
+
+        function start() {
+            renderFavBar();
+            updateGiallo(0);
+            setInterval(() => {
+                document.getElementById('tn-clock').innerText = new Date().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' }) + ' • CABA';
+            }, 1000);
+        }
+        start();
+    })();
+</script>
+
+  
